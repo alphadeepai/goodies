@@ -1,0 +1,131 @@
+{#- Begin-of-sequence token to start the model prompt -#}
+{{ bos_token }}
+
+{#- Extract system message -#}
+{%- if messages[0]['role'] == 'system' -%}
+    {%- if messages[0]['content'] is string -%}
+        {%- set system_message = messages[0]['content'] -%}
+    {%- else -%}
+        {%- set system_message = messages[0]['content'][0]['text'] -%}
+    {%- endif -%}
+    {%- set loop_messages = messages[1:] -%}
+{%- else -%}
+    {%- set system_message = "" -%}
+    {%- set loop_messages = messages -%}
+{%- endif -%}
+
+{#- Set tools to none if not defined -#}
+{%- if not tools is defined %}
+    {%- set tools = none %}
+{%- endif %}
+
+{#- Tool Instructions -#}
+{%- if tools is not none -%}
+    {%- set tool_prompt = "At each turn, if you decide to invoke any of the function(s), it should be wrapped with ```tool_code```. The python methods described below are imported and available, you can only use defined methods. You may call 1 tool per turn ONLY. The generated code should be readable and efficient, make sure to use commas between parameters. Also make sure to use True and False instead of true and false (only title case for boolean is valid Python). The response to a method will be wrapped in ```tool_output``` use it to call more tools or generate a helpful, friendly response. When using a ```tool_code``` think step by step why and how it should be used.\n\nThe following Python methods are available:\n\n```python\n" -%}
+{%- else -%}
+    {%- set tool_prompt = "" -%}
+{%- endif -%}
+
+{#- Main message loop -#}
+{%- for message in loop_messages -%}
+    {#- Resolve role -#}
+    {%- if (message['role'] == 'assistant') -%}
+        {%- set role = "model" -%}
+    {%- elif (message['role'] == 'tool') -%}
+        {%- set role = "user" -%}
+    {%- else -%}
+        {%- set role = message['role'] -%}
+    {%- endif -%}
+    
+    {{ '<start_of_turn>' + role + '\n' -}}
+
+    {#- Insert system message and tool prompt at the beginning of the first message -#}
+    {%- if loop.first and (system_message != "" or tool_prompt != "") -%}
+        {%- if system_message != "" -%}{{ system_message + '\n\n' }}{%- endif -%}
+        {%- if tool_prompt != "" -%}
+            {{ tool_prompt }}
+            {%- for tool in tools -%}
+def {{ tool.function.name }}(
+{%- if tool.function.parameters and tool.function.parameters.properties -%}
+{%- for prop_name, prop_details in tool.function.parameters.properties.items() -%}
+    {{ prop_name }}{% if prop_details.type %}: {{ prop_details.type }}{% endif %}{% if not loop.last %}, {% endif %}
+{%- endfor -%}
+{%- endif -%}
+):
+    """{{ tool.function.description }}
+{% if tool.function.parameters and tool.function.parameters.properties %}
+    Args:
+{%- for prop_name, prop_details in tool.function.parameters.properties.items() %}
+      {{ prop_name }}: {{ prop_details.description if prop_details.description else prop_name }}
+{%- endfor -%}
+{%- endif %}
+    """
+    pass
+
+            {%- endfor -%}
+            {{ "```\n\n" }}
+        {%- endif -%}
+    {%- endif -%}
+
+    {#- Format model tool calls -#}
+    {%- if 'tool_calls' in message -%}
+        {{- '```tool_code\n' -}}
+        {%- for tool_call in message.tool_calls -%}
+            {%- if tool_call.function is defined -%}
+                {%- set tool_call = tool_call.function -%}
+            {%- endif -%}
+            {{- tool_call.name + '(' -}}
+
+            {%- if tool_call.arguments is string -%}
+                {%- if tool_call.arguments.startswith('{') -%}
+                    **{{ tool_call.arguments }}
+                {%- else -%}
+                    {{ tool_call.arguments }}
+                {%- endif -%}
+            {%- elif tool_call.arguments is iterable and tool_call.arguments is mapping -%}
+                {%- set first = true -%}
+                {%- for key, val in tool_call.arguments.items() -%}
+                    {%- if not first %}, {% endif -%}
+                    {{ key }}={{ val | tojson }}
+                    {%- set first = false -%}
+                {%- endfor -%}
+            {%- elif tool_call.arguments is iterable -%}
+                {{- tool_call.arguments | map('tojson') | join(', ') -}}
+            {%- else -%}
+                {{- tool_call.arguments | tojson -}}
+            {%- endif -%}
+            {{- ')\n' -}}
+        {%- endfor -%}
+        {{- '```\n' -}}
+    {%- endif -%}
+    
+    {#- Content -#}
+    {%- if message['content'] is string -%}
+        {%- if message['role'] == 'tool' -%}
+            {{- '```tool_output\n' -}}
+            {{ message['content'] | trim }}
+            {{- '\n```' -}}
+        {%- else -%}
+            {{ message['content'] | trim }}
+        {%- endif -%}
+    {%- elif message['content'] is iterable -%}
+        {%- if message['role'] == 'tool' -%}
+            {{- '```tool_output\n' -}}
+        {%- endif -%}
+        {%- for item in message['content'] -%}
+            {%- if item['type'] == 'text' -%}
+                {{ item['text'] | trim }}
+            {%- endif -%}
+        {%- endfor -%}
+        {%- if message['role'] == 'tool' -%}
+            {{- '\n```' -}}
+        {%- endif -%}
+    {%- endif -%}
+
+    {{ '\n<end_of_turn>\n' }}
+{%- endfor -%}
+
+{#- Add generation prompt -#}
+{%- if add_generation_prompt -%}
+    {{'<start_of_turn>model\n'}}
+{%- endif -%}
