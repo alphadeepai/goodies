@@ -30,6 +30,18 @@ Standard Python AST parsing of tool blocks can fail if the model makes minor for
 2. **Output Block**: The model responds by wrapping function calls inside a ````tool_code ... ```` markdown block.
 3. **Parsing**: The parser extracts the content of the ````tool_code```` block, applies the heuristic fixes, parses the syntax using Python's `ast` module, and maps the calls back to the OpenAI tool call protocol structure used by vLLM (both for standard and streaming APIs).
 
+---
+
+## Acknowledgements
+
+This project was built with the support of the [Google TPU Research Cloud (TRC)](https://sites.research.google/trc/).
+
+<p align="left">
+  <img src="logotrc.png" width="200" alt="Google TPU Research Cloud Logo" />
+</p>
+
+---
+
 ## License
 
 This project is licensed under the [MIT License](https://opensource.org/licenses/MIT).
